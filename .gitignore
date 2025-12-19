@@ -1,18 +1,17 @@
-# Ambienti virtuali
+# Python
+__pycache__/
+*.py[cod]
 .venv/
 venv/
-ENV/
+*.env
 
-# Bytecode Python
-__pycache__/
-*.pyc
-
-# File di configurazione IDE
-.idea/
-.vscode/
+# Mac
 .DS_Store
 
-# Dati dei Database (non caricarli mai!)
-*.db
-user_db_data/
-data_db_data/
+# IDE
+.idea/
+.vscode/
+
+# Docker
+mysql_data/
+kafka_data/

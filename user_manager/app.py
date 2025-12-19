@@ -5,7 +5,6 @@ from concurrent import futures
 
 import grpc
 from flask import Flask, request, jsonify
-import mysql.connector
 
 from db import get_db_connection, init_db
 import user_service_pb2

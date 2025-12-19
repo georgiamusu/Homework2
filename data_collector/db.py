@@ -22,8 +22,11 @@ def init_db():
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS interests (
                     id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_email VARCHAR(120),
-                    airport_code VARCHAR(10)
+                    email VARCHAR(120) NOT NULL,
+                    airport_code VARCHAR(10) NOT NULL,
+                    high_value INT DEFAULT NULL,
+                    low_value INT DEFAULT NULL,
+                    UNIQUE(email, airport_code)
                 )
             """)
 
@@ -33,8 +36,20 @@ def init_db():
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     airport_code VARCHAR(10),
                     query_time DATETIME,
-                    arrivals_count INT,
-                    departures_count INT
+                    arrivals_count INT DEFAULT 0,
+                    departures_count INT DEFAULT 0
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS flights_detailed (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    icao24 VARCHAR(20),            
+                    airport_monitorato VARCHAR(10),
+                    icao_partenza VARCHAR(10),     
+                    icao_arrivo VARCHAR(10),       
+                    orario_partenza DATETIME,      
+                    orario_arrivo DATETIME         
                 )
             """)
 

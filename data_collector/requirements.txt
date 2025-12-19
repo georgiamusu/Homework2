@@ -6,3 +6,5 @@ grpcio-tools==1.60.0
 requests==2.31.0
 protobuf==4.21.12
 python-dotenv==1.0.0
+kafka-python
+pybreaker

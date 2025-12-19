@@ -1,94 +1,83 @@
-import os
-import time
 import requests
+import time
+import logging
 
-TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
-CLIENT_ID = os.getenv("OPEN_SKY_CLIENT_ID")
-CLIENT_SECRET = os.getenv("OPEN_SKY_CLIENT_SECRET")
+logger = logging.getLogger(__name__)
 
-CACHED_TOKEN = None
-TOKEN_EXPIRATION_TIME = 0
+class OpenSkyClient:
+    def __init__(self, client_id, client_secret):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.token = None
+        self.token_expiry = 0
+        self.token_url = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+        self.api_url = "https://opensky-network.org/api"
 
-def is_token_expired():
-    return CACHED_TOKEN is None or time.time() >= (TOKEN_EXPIRATION_TIME - 60)
+    def _get_token(self):
+        if self.token and time.time() < self.token_expiry:
+            return self.token
 
-def get_opensky_token():
-    if not CLIENT_ID or not CLIENT_SECRET:
-        print("CLIENT_ID o CLIENT_SECRET mancanti.")
-        return None
+        logger.info(" Richiesta nuovo Token OpenSky...")
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+        }
 
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-    }
+        try:
+            response = requests.post(self.token_url, data=payload)
+            if response.status_code == 200:
+                data = response.json()
+                self.token = data['access_token']
+                # Scade un po' prima per sicurezza
+                self.token_expiry = time.time() + data.get('expires_in', 1800) - 60
+                logger.info(" Token ottenuto con successo")
+                return self.token
+            else:
+                logger.error(f" Errore Token: {response.text}")
+                response.raise_for_status()
+        except Exception as e:
+            logger.error(f"Errore connessione auth: {e}")
+            raise e
 
-    try:
-        print("Richiesta rinnovo Token OpenSky...")
-        response = requests.post(
-            TOKEN_URL,
-            data=payload,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=10
-        )
-        response.raise_for_status()
-        return response.json()
+    def get_arrival_stats(self, airport_code):
+        """
+        Scarica la LISTA COMPLETA dei voli usando il Token Bearer.
+        """
+        end_time = int(time.time())
+        begin_time = end_time - (12 * 3600)
 
-    except requests.RequestException as e:
-        print(f"Errore richiesta token: {e}")
-        return None
+        try:
+            # 1. Ottieni il token valido
+            token = self._get_token()
 
-def get_token():
-    global CACHED_TOKEN, TOKEN_EXPIRATION_TIME
+            # 2. Prepara la richiesta autenticata
+            headers = {
+                "Authorization": f"Bearer {token}"
+            }
 
-    if is_token_expired():
-        token_data = get_opensky_token()
-        if token_data and 'access_token' in token_data:
-            CACHED_TOKEN = token_data['access_token']
-            TOKEN_EXPIRATION_TIME = time.time() + token_data.get('expires_in', 1800)
-            print("Token OpenSky aggiornato con successo!")
-        else:
-            print("Impossibile ottenere il token.")
-            return None
+            url_arrival = f"{self.api_url}/flights/arrival"
+            params = {
+                'airport': airport_code,
+                'begin': begin_time,
+                'end': end_time
+            }
 
-    return CACHED_TOKEN
+            logger.info(f" Scarico voli per {airport_code} (Auth: Bearer Token)...")
+            response = requests.get(url_arrival, headers=headers, params=params, timeout=10)
 
-# FUNZIONE SCARICAMENTO VOLI
-def get_arrivals_count(airport_code):
-    end_time = int(time.time())
-    begin_time = end_time - 3600 # Ultima ora
+            if response.status_code == 200:
+                flights_list = response.json()
+                logger.info(f" Scaricati {len(flights_list)} voli.")
+                return flights_list
 
-    url = "https://opensky-network.org/api/flights/arrival"
-    params = {
-        'airport': airport_code,
-        'begin': begin_time,
-        'end': end_time
-    }
+            elif response.status_code == 404:
+                logger.warning(f"Nessun volo trovato per: {airport_code}")
+                return []
+            else:
+                logger.error(f"Errore API ({response.status_code}): {response.text}")
+                response.raise_for_status()
 
-    token = get_token()
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    else:
-        print("Nessun token disponibile, provo senza autenticazione.")
-
-    print(f"Chiamata OpenSky (OAuth) per {airport_code}...")
-
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            flights = response.json()
-            return len(flights), None
-
-        elif response.status_code == 404:
-            return 0, None # Nessun volo trovato
-
-        elif response.status_code == 429:
-            return -1, "Troppe richieste (429)"
-
-        else:
-            return -1, f"Errore API: {response.status_code}"
-
-    except requests.exceptions.RequestException as e:
-        return -1, f"Errore rete: {e}"
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Eccezione OpenSky: {e}")
+            raise e

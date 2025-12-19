@@ -1,6 +1,6 @@
 import mysql.connector
 import time
-import sys
+
 
 def get_db_connection():
     return mysql.connector.connect(

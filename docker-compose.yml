@@ -4,6 +4,7 @@ services:
   # --- USER MANAGER SERVICE ---
   user-manager:
     build: ./user_manager
+    container_name: homework_2-user-manager
     ports:
       - "5001:5001"   # REST API
       - "50051:50051" # gRPC
@@ -17,34 +18,41 @@ services:
   # Database MySQL per User Manager
   user-db:
     image: mysql:8.0
+    container_name: hw_2-user-db
     ports:
-      - "3307:3306" # Mappiamo sulla 3307 per non occupare la 3306 del Mac
+      - "3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: user_db
-    platform: linux/amd64 # Fondamentale per il tuo Mac M1/M2
+    platform: linux/amd64
     networks:
       - flight-network
+    volumes:
+      - user_db_data:/var/lib/mysql
 
   # --- DATA COLLECTOR SERVICE ---
   data-collector:
     build: ./data_collector
+    container_name: homework_2-data-collector
     ports:
       - "5002:5002"
     environment:
       - PYTHONUNBUFFERED=1
       - USER_MANAGER_HOST=user-manager:50051
       - OPEN_SKY_CLIENT_ID=giorgiamusumeci@hotmail.it-api-client
-      - OPEN_SKY_CLIENT_SECRET=HE7nfpIzDjvYIe7B69dT337O3J1h52iS
+      - OPEN_SKY_CLIENT_SECRET=B4RGHwwL2JoFLtDvosDOmT1LssgSsXgZ
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092 #container kafka su porta 9092
     depends_on:
       - data-db
       - user-manager
+      - kafka
     networks:
       - flight-network
 
   # Database MySQL per Data Collector
   data-db:
     image: mysql:8.0
+    container_name: homework_2-data-db
     ports:
       - "3308:3306"
     environment:
@@ -53,6 +61,99 @@ services:
     platform: linux/amd64
     networks:
       - flight-network
+    volumes:
+      - data_db_data:/var/lib/mysql
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    ports:
+      - "29092:29092" #porta per accedere all'host
+    environment:
+      #singoli nodi
+      KAFKA_PROCESS_ROLES: broker, controller
+      KAFKA_NODE_ID: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+
+      #listeners
+      # 9092 : per i container docker
+      # 29092 : localhost
+      # 29093 : controller interno
+      KAFKA_LISTENERS:  PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      #default
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      #dati
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/kafka
+    networks:
+      - flight-network
+
+  #alert system
+  alert-system:
+    build: ./alert_system
+    container_name: hm-alert-system
+    depends_on:
+      - kafka
+      - data-db
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    networks:
+      - flight-network
+
+  #notifier system
+  notifier-system:
+    build: ./notifier_system
+    container_name: hm2-notifier-system
+    depends_on:
+      - kafka
+      - mailhog
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - EMAIL_HOST=mailhog
+      - EMAIL_PORT=1025
+    networks:
+      - flight-network
+
+  #mailhog
+  mailhog:
+    image: mailhog/mailhog
+    container_name: mailhog
+    ports:
+      - "1025:1025" #SMTP NOTIFIER MANDA LE MAIL QUI
+      - "8025:8025" #dove leggere email
+    networks:
+      - flight-network
+
+  #api gateway (NGINX)
+  api-gateway:
+    image: nginx:latest
+    container_name: api-gateway
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - user-manager
+      - data-collector
+    networks:
+      - flight-network
+
+volumes:
+  user_db_data:
+  data_db_data:
+  kafka-data: #persistente
 
 networks:
   flight-network:
