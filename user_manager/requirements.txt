@@ -4,3 +4,4 @@ grpcio==1.60.0
 grpcio-tools==1.60.0
 protobuf==4.21.12
 python-dotenv==1.0.0
+prometheus-client

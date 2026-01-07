@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifier-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notifier-system
+  template:
+    metadata:
+      labels:
+        app: notifier-system
+    spec:
+      containers:
+        - name: notifier-system
+          image: homework_3-notifier-system:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "my-kafka:9092"
+            - name: MAIL_SERVER
+              value: "mailhog"
+            - name: MAIL_PORT
+              value: "1025"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailhog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mailhog
+  template:
+    metadata:
+      labels:
+        app: mailhog
+    spec:
+      containers:
+        - name: mailhog
+          image: mailhog/mailhog
+          ports:
+            - containerPort: 1025 # Porta SMTP
+            - containerPort: 8025 # Porta Web UI
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailhog
+spec:
+  selector:
+    app: mailhog
+  ports:
+    - protocol: TCP
+      port: 1025
+      targetPort: 1025
+      name: smtp
+    - protocol: TCP
+      port: 8025
+      targetPort: 8025
+      name: http

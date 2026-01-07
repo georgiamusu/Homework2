@@ -1,14 +1,18 @@
 import json
+import os
 import threading
+import time
 from concurrent import futures
-
+import random
 
 import grpc
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 from db import get_db_connection, init_db
 import user_service_pb2
 import user_service_pb2_grpc
+
+from prometheus_client import Counter, Gauge, generate_latest
 
 app = Flask(__name__)
 
@@ -37,6 +41,25 @@ def serve_grpc():
     server.start()
     print("Server gRPC attivo sulla porta 50051")
     server.wait_for_termination()
+
+#monitoraggio
+NODE_NAME = os.getenv('NODE_NAME', 'unknown-node')
+SERVICE_NAME ='user-manager'
+
+REQUEST_COUNT =Counter(
+    'user_manager_requests_total',
+    'Totale richieste ricevute dal servizio User Manager',
+    ['method','endpoint', 'service', 'node']
+)
+
+#gauge -> misura il tempo di rispsota
+OP_DURATION = Gauge(
+    'user_manager_op_duration_seconds',
+    'Durata delle operazioni interne',
+    ['operation', 'service', 'node']
+)
+
+
 
 #API REST
 @app.route('/register', methods=['POST'])
@@ -83,7 +106,47 @@ def register_user():
     finally:
         if conn and conn.is_connected(): conn.close()
 
-#main
+@app.before_request
+def before_request():
+    request.start_time = time.time() #salvo orario inizio richiesta
+
+@app.after_request
+def after_request(response):
+    latency = time.time() - request.start_time #calcolo quanto tempo è passato
+
+    #aggiornamento counter
+    REQUEST_COUNT.labels(
+        method = request.method,
+        endpoint = request.path,
+        service = SERVICE_NAME,
+        node = NODE_NAME
+    ).inc()
+
+    #aggiornamento gauge
+    OP_DURATION.labels(
+        operation = 'http_request',
+        service = SERVICE_NAME,
+        node = NODE_NAME
+    ).set(latency)
+
+    return response
+
+@app.route('/metrics')
+def metrics():
+    return Response(generate_latest(), mimetype='text/plain')
+
+@app.route('/')
+def home():
+    return jsonify({"message": "User Manager is running"})
+
+@app.route('/db-test')
+def db_test():
+    with OP_DURATION.labels(operation='database_query', service=SERVICE_NAME, node=NODE_NAME).time():
+        # Qui simuliamo un ritardo del DB
+        time.sleep(random.uniform(0.1, 0.5))
+    return jsonify({"status": "DB query simulated"})
+
+
 if __name__ == '__main__':
     print("AVVIO USER MANAGER", flush=True)
     init_db()

@@ -3,7 +3,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 from apscheduler.schedulers.background import BackgroundScheduler
 import mysql.connector
@@ -16,15 +16,32 @@ import user_service_pb2
 import user_service_pb2_grpc
 from kafka import KafkaProducer
 
+from prometheus_client import Counter, Gauge, generate_latest
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+#monitoring
+NODE_NAME = os.getenv('NODE_NAME', 'unknown-node')
+SERVICE_NAME = 'data-collector'
+
+OP_COUNT = Counter (
+    'data_collector_operations_total',
+    'Totale operazioni eseguite',
+    ['type','service', 'node']
+)
+
+JOB_DURATION = Gauge (
+    'data_collector_job_duration_seconds',
+    'Tempo impiegato per scariscare i dati da OpenSky',
+    ['airport', 'service', 'node']
+)
+
 # Configurazione Variabili d'Ambiente (con valori di default)
 USER_MANAGER_HOST = os.getenv('USER_MANAGER_HOST', 'user-manager:50051')
 OPENSKY_USER = os.getenv('OPEN_SKY_CLIENT_ID', 'giorgiamusumeci@hotmail.it-api-client')
-OPENSKY_PASS = os.getenv('OPEN_SKY_CLIENT_SECRET', 'B4RGHwwL2JoFLtDvosDOmT1LssgSsXgZ')
+OPENSKY_PASS = os.getenv('OPEN_SKY_CLIENT_SECRET', 'vl5c6lj1pCEY6kLCfRS5Y9zmIwVU405H')
 
 # CONFIGURAZIONE CIRCUIT BREAKER
 # Se fallisce 3 volte di fila, apre il circuito per 60 sec
@@ -38,7 +55,7 @@ def get_kafka_producer():
     if producer is None:
         try:
             producer = KafkaProducer(
-                bootstrap_servers=['kafka:9092'],
+                bootstrap_servers=['my-kafka:9092'],
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             logger.info(" Connesso a Kafka")
@@ -82,6 +99,8 @@ def job_scarica_voli():
 
         for row in airports:
             code = row['airport_code']
+
+            start_time = time.time()
             try:
                 logger.info(f" Scarico lista voli per {code}...")
 
@@ -127,18 +146,28 @@ def job_scarica_voli():
                             "timestamp": time.time()
                         }
                         kafka_prod.send('flight_data', message)
-                        logger.info(f"📨 Kafka notificato: {arrivals_count} arrivi per {code}")
+                        logger.info(f" Kafka notificato: {arrivals_count} arrivi per {code}")
+
+                    OP_COUNT.labels(type='data_download_success', service=SERVICE_NAME, node=NODE_NAME).inc()
 
             except pybreaker.CircuitBreakerError:
                 logger.error(f" Circuit Breaker APERTO per {code}")
+                OP_COUNT.labels(type='circuit_breaker_open', service=SERVICE_NAME, node= NODE_NAME).inc()
             except Exception as e:
                 logger.error(f" Errore su {code}: {e}")
+            finally:
+                duration = time.time() - start_time
+                JOB_DURATION.labels(airport=code, service=SERVICE_NAME, node=NODE_NAME).set(duration)
 
     except Exception as e:
         logger.error(f" Errore job: {e}")
     finally:
         cursor.close()
         conn.close()
+
+@app.route('/metrics')
+def metrics():
+    return Response(generate_latest(), mimetype='text/plain')
 
 # API REST
 @app.route('/add_interest', methods=['POST'])
@@ -173,6 +202,9 @@ def add_interest():
                 """
             cursor.execute(query, (email, airport_code, high_value, low_value))
             conn.commit()
+
+            OP_COUNT.labels(type='interest_added', service=SERVICE_NAME, node=NODE_NAME).inc()
+
             return jsonify({"message": f"Interesse aggiunto: {airport_code} (Soglie: {low_value}-{high_value})"}), 201
         except mysql.connector.Error as err:
             if err.errno == 1062: # Duplicate entry
@@ -240,7 +272,7 @@ def get_average_stats(code, days):
     finally:
         if conn: conn.close()
 
-# --- AVVIO ---
+# AVVIO
 if __name__ == '__main__':
     print("Attesa avvio servizi...", flush=True)
     time.sleep(10) # Aspetta che DB e Kafka siano pronti
@@ -248,9 +280,9 @@ if __name__ == '__main__':
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(job_scarica_voli, 'interval', hours=12)
-    scheduler.start()
 
     job_scarica_voli()
 
+    scheduler.start()
     print("Data Collector HW2 attivo sulla porta 5002")
     app.run(host='0.0.0.0', port=5002, debug=False)

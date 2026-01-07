@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'user-manager'
+    static_configs:
+    - targets: ['user-manager:5001']
+
+  - job_name: 'data-collector'
+    static_configs:
+      - targets: ['data-collector:5002']

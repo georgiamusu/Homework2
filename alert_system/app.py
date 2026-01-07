@@ -7,7 +7,7 @@ import mysql.connector
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-KAFKA_BROKER = 'kafka:9092'
+KAFKA_BROKER = 'my-kafka:9092'
 TOPIC_INPUT = 'flight_data'
 TOPIC_OUTPUT = 'alerts'
 
@@ -28,7 +28,6 @@ def main():
         TOPIC_INPUT,
         bootstrap_servers=KAFKA_BROKER,
         value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-        # CAMBIO IL NOME PER FORZARE LA RILETTURA DEI MESSAGGI VECCHI
         group_id='alert_groups_fix_final',
         auto_offset_reset='earliest'
     )
