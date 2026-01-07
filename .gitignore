@@ -11,7 +11,11 @@ venv/
 # IDE
 .idea/
 .vscode/
+*.iml
 
 # Docker
 mysql_data/
 kafka_data/
+
+# Logs e file temporanei
+*.log
